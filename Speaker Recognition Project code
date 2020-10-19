@@ -1,0 +1,870 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# import dataset"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import os\n",
+    "import librosa\n",
+    "import numpy as np\n",
+    "from collections import Counter\n",
+    "import noisereduce as nr\n",
+    "import matplotlib.pyplot as plt\n",
+    "import librosa.display\n",
+    "from scipy.stats import zscore\n",
+    "from sklearn.preprocessing import StandardScaler\n",
+    "from sklearn.model_selection import GridSearchCV\n",
+    "from sklearn.model_selection import train_test_split\n",
+    "from sklearn.metrics import classification_report\n",
+    "from sklearn.metrics import plot_confusion_matrix\n",
+    "from sklearn.svm import SVC\n",
+    "from sklearn.neural_network import MLPClassifier\n",
+    "import csv\n",
+    "import pandas as pd\n",
+    "from sklearn.manifold import TSNE\n",
+    "import IPython.display as ipd"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "letter_to_label = {\n",
+    "    \"a\": 0,\n",
+    "    \"b\": 1,\n",
+    "    \"c\": 2,\n",
+    "    \"d\": 3,\n",
+    "    \"e\": 4,\n",
+    "    \"f\": 5,\n",
+    "    \"g\": 6,\n",
+    "    \"h\": 7,\n",
+    "    \"i\": 8,\n",
+    "    \"j\": 9\n",
+    "}\n",
+    "\n",
+    "sr=24000\n",
+    "\n",
+    "X_dev = []\n",
+    "y_dev = []\n",
+    "\n",
+    "for label in sorted(os.listdir(\"./DSL1920_dataset_sept/development/\")):\n",
+    "    for file in sorted(os.listdir(os.path.join(\"./DSL1920_dataset_sept/development/\",label))):\n",
+    "        X_dev.append(librosa.load(os.path.join(\"./DSL1920_dataset_sept/development/\", label, file), sr=sr)[0])\n",
+    "        y_dev.append(letter_to_label[label])\n",
+    "        \n",
+    "ids = []\n",
+    "X_eval = []\n",
+    "\n",
+    "for file in os.listdir(\"./DSL1920_dataset_sept/evaluation/\"):\n",
+    "    ids.append(file.split(\".\")[0])\n",
+    "    X_eval.append(librosa.load(os.path.join(\"./DSL1920_dataset_sept/evaluation/\", file), sr=sr)[0])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "X_dev = np.array(X_dev)\n",
+    "y_dev = np.array(y_dev)\n",
+    "X_eval = np.array(X_eval)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "print(X_dev.shape, X_eval.shape, len(ids))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def print_spectrum(data, sr):\n",
+    "    X_per_spec = librosa.stft(data)\n",
+    "    Xdb = librosa.amplitude_to_db(abs(X_per_spec))\n",
+    "    plt.figure(figsize=(20, 12))\n",
+    "    librosa.display.specshow(Xdb, sr=sr, x_axis='time', y_axis='log')\n",
+    "    plt.colorbar()\n",
+    "    plt.show()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "vet = []\n",
+    "for i in range(len(X_dev)):\n",
+    "    vet.append(np.std(X_dev[i]))\n",
+    "    \n",
+    "plt.hist(vet, bins=20)\n",
+    "plt.show()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "vet = []\n",
+    "for i in range(len(X_eval)):\n",
+    "    vet.append(np.std(X_eval[i]))\n",
+    "    \n",
+    "plt.hist(vet, bins=20)\n",
+    "plt.show()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# balanced classes"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "print(Counter(y_dev))"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# remove signals shorter than 12000 samples and take noise signal (9 signals)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "x_not_12000 = [i for i, x in enumerate(X_dev) if len(x)<11900]#(len(x) != 11999 and len(x) != 12000)]\n",
+    "NOISE1 = X_dev[4608]\n",
+    "print(x_not_12000)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "X_dev = np.delete(X_dev, x_not_12000)\n",
+    "y_dev = np.delete(y_dev, x_not_12000)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# noise reduction"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "print_spectrum(NOISE1, sr=sr)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "ipd.Audio(NOISE1, rate=sr)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "ipd.Audio(X_dev[18], rate=sr)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "print_spectrum(X_dev[18], sr=sr)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "\n",
+    "### padding the sound before denoise because of distortion at the start and the end of signal\n",
+    "\n",
+    "for i in range(len(X_dev)):\n",
+    "    X_dev[i] = np.pad(X_dev[i], (2500, 2500), mode=\"reflect\")\n",
+    "    X_dev[i] = nr.reduce_noise(audio_clip=X_dev[i], noise_clip=NOISE1)\n",
+    "    X_dev[i] = X_dev[i][2500: len(X_dev[i])-2500]\n",
+    "    \n",
+    "for i in range(len(X_eval)):\n",
+    "    X_eval[i] = np.pad(X_eval[i], (2500, 2500), mode=\"reflect\")\n",
+    "    X_eval[i] = nr.reduce_noise(audio_clip=X_eval[i], noise_clip=NOISE1)\n",
+    "    X_eval[i] = X_eval[i][2500: len(X_eval[i])-2500]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "ipd.Audio(X_dev[18], rate=sr)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "scrolled": false
+   },
+   "outputs": [],
+   "source": [
+    "print_spectrum(X_dev[18], sr=sr)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "print(X_dev.shape, y_dev.shape)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# normalize signals"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def normalize_data(X):\n",
+    "    return np.array([zscore(x) for x in X])\n",
+    "\n",
+    "X_dev = normalize_data(X_dev)\n",
+    "X_eval = normalize_data(X_eval)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "for i in range(len(X_eval)):\n",
+    "    X_eval[i] = np.nan_to_num(X_eval[i], 0)\n",
+    "    \n",
+    "for i in range(len(X_dev)):\n",
+    "    X_dev[i] = np.nan_to_num(X_dev[i], 0)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# print audio signals"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "plt.figure(figsize=(20,5))\n",
+    "librosa.display.waveplot(X_dev[18], sr=sr)\n",
+    "plt.show()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def print_samples(data, sr):\n",
+    "    plt.figure(figsize=(20, 8))\n",
+    "    for idx in range(0, len(data), 1004):\n",
+    "        librosa.display.waveplot(data[idx], sr=sr, alpha=0.5)\n",
+    "    plt.show()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "print_samples(X_dev, sr)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# extract features"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def extract_features(X, sr):\n",
+    "    feat_X = []\n",
+    "    n_fft = int(sr*0.03)\n",
+    "    hop = int(sr*0.01)\n",
+    "\n",
+    "    for x in X:\n",
+    "        chroma_stft = librosa.feature.chroma_stft(y=x, sr=sr, n_fft=n_fft, hop_length=hop)\n",
+    "        rms = librosa.feature.rms(y=x, frame_length=n_fft, hop_length=hop)\n",
+    "        spec_cent = librosa.feature.spectral_centroid(y=x, sr=sr, hop_length=hop, n_fft=n_fft)\n",
+    "        spec_bw = librosa.feature.spectral_bandwidth(y=x, sr=sr, n_fft=n_fft, hop_length=hop)\n",
+    "        rolloff = librosa.feature.spectral_rolloff(y=x, sr=sr, n_fft=n_fft, hop_length=hop)\n",
+    "        zcr = librosa.feature.zero_crossing_rate(x, frame_length=n_fft, hop_length=hop)\n",
+    "        mfcc = librosa.feature.mfcc(y=x, sr=sr, hop_length=hop, n_fft=n_fft, n_mfcc=26)\n",
+    "        mel = librosa.feature.melspectrogram(x, sr=sr, n_fft=n_fft, hop_length=hop, n_mels=128)\n",
+    "        contrast = librosa.feature.spectral_contrast(x, sr=sr, n_fft=n_fft, hop_length=hop)\n",
+    "        deltas = librosa.feature.delta(mfcc)\n",
+    "        \n",
+    "        \n",
+    "        feat_x = np.array([np.mean(rms), np.mean(spec_bw), np.mean(rolloff), np.mean(zcr), np.mean(spec_cent)])\n",
+    "        feat_x = np.append(feat_x, [np.mean(e) for e in chroma_stft])\n",
+    "        feat_x = np.append(feat_x, [np.mean(e) for e in contrast])\n",
+    "        feat_x = np.append(feat_x, [np.mean(e) for e in mfcc])\n",
+    "        feat_x = np.append(feat_x, [np.mean(e) for i, e in enumerate(mel) if i<20])\n",
+    "        feat_x = np.append(feat_x, [np.mean(e) for e in deltas])\n",
+    "        \n",
+    "        feat_X.append(feat_x)\n",
+    "\n",
+    "    return np.array(feat_X)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "feat_X_dev = extract_features(X_dev, sr)\n",
+    "feat_X_eval = extract_features(X_eval, sr)\n",
+    "print(feat_X_dev.shape, feat_X_eval.shape)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "ss = StandardScaler()\n",
+    "X_dev_scaled = ss.fit_transform(feat_X_dev)\n",
+    "X_eval_scaled = ss.fit_transform(feat_X_eval)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def build_classifier(X_train, y_train, X_test, y_test, clf_to_evaluate, scores, param_grid, n_folds=5):\n",
+    "    \n",
+    "    clf = GridSearchCV(clf_to_evaluate, param_grid, cv=n_folds, scoring=score, n_jobs=-1)\n",
+    "    clf.fit(X_train, y_train)\n",
+    "    \n",
+    "    print(f\"Best parameters set on dev set: {clf.best_params_}\")\n",
+    "    print()\n",
+    "    print(\"Grid scores on dev set:\\n\")\n",
+    "    means = clf.cv_results_[\"mean_test_score\"]\n",
+    "    stds = clf.cv_results_[\"std_test_score\"]\n",
+    "    for mean, std, params in zip(means, stds, clf.cv_results_[\"params\"]):\n",
+    "        print(f\"{mean:.5f} (+/- {std:.5f}) for {params}\")\n",
+    "    print()\n",
+    "    \n",
+    "    print(\"Detailed classification report: \")\n",
+    "    print(\"\\nScores on full evaluation set: \")\n",
+    "    y_true, y_pred = y_test, clf.predict(X_test)\n",
+    "    fig, ax = plt.subplots(figsize=(20, 20))\n",
+    "    disp = plot_confusion_matrix(clf, X_test, y_test, display_labels=[\"a\", \"b\", \"c\", \"d\", \"e\", \"f\", \"g\", \"h\", \"i\", \"j\"], cmap=\"Blues\", normalize=\"true\", ax=ax)\n",
+    "    disp.ax_.set_title(\"Confusion matrix\")\n",
+    "    plt.show()\n",
+    "    print(classification_report(y_true, y_pred))\n",
+    "    \n",
+    "    return clf"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## SVM"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "X_train, X_test, y_train, y_test = train_test_split(X_dev_scaled, y_dev, test_size=0.2, shuffle=True, stratify=y_dev)\n",
+    "score = \"f1_macro\"\n",
+    "\n",
+    "params_grid = {\n",
+    "    \"kernel\": [\"rbf\"],#[\"rbf\", \"poly\", \"sigmoid\", \"linear\"],\n",
+    "    \"gamma\": [\"auto\", \"scale\"],\n",
+    "    \"C\": [0.1, 0.5, 1, 1.5, 2, 5, 10, 50, 100]\n",
+    "}\n",
+    "\n",
+    "\n",
+    "clf_to_evaluate = SVC()\n",
+    "\n",
+    "best_clf = build_classifier(X_train, y_train, X_test, y_test, clf_to_evaluate, score, params_grid)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "clf = SVC(**best_clf.best_params_)\n",
+    "clf.fit(X_dev_scaled, y_dev)\n",
+    "y_pred = clf.predict(X_eval_scaled)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def print_file(filename, ids, y_pred):\n",
+    "\n",
+    "    label_to_letter = {\n",
+    "        0 : \"a\",\n",
+    "        1 : \"b\",\n",
+    "        2 : \"c\",\n",
+    "        3 : \"d\",\n",
+    "        4 : \"e\",\n",
+    "        5 : \"f\",\n",
+    "        6 : \"g\",\n",
+    "        7 : \"h\",\n",
+    "        8 : \"i\",\n",
+    "        9 : \"j\"\n",
+    "    }\n",
+    "\n",
+    "    with open(filename, \"w\") as f:\n",
+    "        f.write(\"Id,Predicted\\n\")\n",
+    "        for i in range(len(y_pred)):\n",
+    "            f.write(f\"{ids[i]},{label_to_letter[y_pred[i]]}\\n\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "print_file(str(best_clf.best_params_)+\".csv\", ids, y_pred)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# neural network"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "X_train, X_test, y_train, y_test = train_test_split(X_dev_scaled, y_dev, test_size=0.2, shuffle=True, stratify=y_dev)\n",
+    "score = \"f1_macro\"\n",
+    "\n",
+    "params_grid = {\n",
+    "    \"hidden_layer_sizes\": [(512, ), (1024, ), (2048, ), (4096, ), (512, 512)],\n",
+    "    \"learning_rate_init\": [0.0001, 0.001, 0.01],\n",
+    "    #\"max_iter\": [200, 400, 600],\n",
+    "    \"solver\": [\"adam\"]#[\"sgd\", \"adam\"]\n",
+    "}\n",
+    "\n",
+    "clf_to_evaluate = MLPClassifier()\n",
+    "\n",
+    "best_clf = build_classifier(X_train, y_train, X_test, y_test, clf_to_evaluate, score, params_grid)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "clf = MLPClassifier(**best_clf.best_params_)\n",
+    "clf.fit(X_dev_scaled, y_dev)\n",
+    "y_pred = clf.predict(X_eval_scaled)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def print_file(filename, ids, y_pred):\n",
+    "\n",
+    "    label_to_letter = {\n",
+    "        0 : \"a\",\n",
+    "        1 : \"b\",\n",
+    "        2 : \"c\",\n",
+    "        3 : \"d\",\n",
+    "        4 : \"e\",\n",
+    "        5 : \"f\",\n",
+    "        6 : \"g\",\n",
+    "        7 : \"h\",\n",
+    "        8 : \"i\",\n",
+    "        9 : \"j\"\n",
+    "    }\n",
+    "\n",
+    "    with open(filename, \"w\") as f:\n",
+    "        f.write(\"Id,Predicted\\n\")\n",
+    "        for i in range(len(y_pred)):\n",
+    "            f.write(f\"{ids[i]},{label_to_letter[y_pred[i]]}\\n\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "print_file(str(best_clf.best_params_)+\".csv\", ids, y_pred)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# print tsne"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import seaborn as sns\n",
+    "\n",
+    "## to run this have to compute the features\n",
+    "tsne = TSNE(n_components=2, verbose=1, perplexity=40, n_iter=4000)\n",
+    "tsne_results = tsne.fit_transform(X_dev_scaled)\n",
+    "\n",
+    "df = pd.DataFrame()\n",
+    "df[\"tsne_one\"] = pd.Series(tsne_results[:,0])\n",
+    "df[\"tsne_two\"] = pd.Series(tsne_results[:,1])\n",
+    "df[\"y\"] = pd.Series(y_dev)\n",
+    "\n",
+    "plt.figure(figsize=(22,14))\n",
+    "sns.scatterplot(\n",
+    "    x=\"tsne_one\", y=\"tsne_two\",\n",
+    "    hue=\"y\",\n",
+    "    palette=sns.color_palette(\"hls\", 10),\n",
+    "    data=df,\n",
+    "    legend=\"full\",\n",
+    "    alpha=0.3\n",
+    ")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### CODE ENDS HERE, here are some preprocessing attempts which didn't improve performance (filtering and removing noisy signals)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### filtering high and low frequencies"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "ipd.Audio(X_dev[18], rate=sr)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "print_spectrum(X_dev[18], sr=sr)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import scipy.signal as signal \n",
+    "\n",
+    "N  = 4    # Filter order\n",
+    "Wn = [2*40./sr, 2*8000./sr] # Cutoff frequency\n",
+    "B, A = signal.butter(N, Wn, btype=\"bandpass\")\n",
+    "\n",
+    "for i in range(len(X_dev)):\n",
+    "    X_dev[i] = np.pad(X_dev[i], (2500, 2500), mode=\"reflect\")\n",
+    "    X_dev[i] = signal.filtfilt(B, A, X_dev[i])\n",
+    "    X_dev[i] = X_dev[i][2500: len(X_dev[i])-2500]\n",
+    "    \n",
+    "for i in range(len(X_eval)):\n",
+    "    X_eval[i] = np.pad(X_eval[i], (2500, 2500), mode=\"reflect\")\n",
+    "    X_eval[i] = signal.filtfilt(B, A, X_eval[i])\n",
+    "    X_eval[i] = X_eval[i][2500: len(X_eval[i])-2500]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "ipd.Audio(X_dev[18], rate=sr)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "print_spectrum(X_dev[18], sr=sr)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### signal to noise ratio"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def signaltonoise(a, axis=0, ddof=0):\n",
+    "    a = np.asanyarray(a)\n",
+    "    m = a.mean(axis)\n",
+    "    sd = a.std(axis=axis, ddof=ddof)\n",
+    "    return np.where(sd == 0, 0, m/sd)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "count=[]\n",
+    "snrvet=[]\n",
+    "\n",
+    "for i in range(len(X_dev)):\n",
+    "    snr = np.abs(signaltonoise(X_dev[i]))\n",
+    "    snrvet.append(snr)\n",
+    "    if snr>0.9:\n",
+    "        count.append(y_dev[i])\n",
+    "        #count.append(X_dev[i])\n",
+    "        \n",
+    "print(len(count))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "#ipd.Audio(count[180], rate=sr)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "plt.hist(snrvet, bins=100, range=(0, 1.5))\n",
+    "plt.show()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "print(Counter(count))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "plt.hist(count, bins=10)\n",
+    "plt.show()"
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.8.2"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 4
+}
